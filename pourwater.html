@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>液体注ぎゲーム</title>
+<script src="liquidfun.js"></script>
+<script>
+let canvas, context;                            //キャンバス
+const world = new b2World(new b2Vec2(0, 9.8));  //物理ワールド（重力：9.8）
+let particleSystem = null, startTime = null;    //パーティクル、開始時間
+//コップ
+let cup = null, index = 0;
+const cups = [[[1.8, 3.3], [1.8, 3.8], [2.2, 3.8], [2.2, 3.3]], //コップデータ（３個分）
+    [[1.5, 3.3], [2.0, 3.8], [2.0, 3.8], [2.5, 3.3]],
+    [[0.8, 3.3], [0.8, 3.6], [3.2, 3.6], [3.2, 3.3]]];
+
+const init = () => {
+    //キャンバスの取得
+    canvas = document.getElementById("note");               //キャンバスを取得
+    context = canvas.getContext("2d");
+    //マウスイベントの登録
+    canvas.addEventListener("mousedown", event => {         //キャンバス上でマウスボタンを押したとき
+       //開始時間を保存
+       startTime = new Date();
+    });
+    canvas.addEventListener("mouseup", event => {           //マウスボタンを放したとき
+       //マウスカーソルの位置を取得
+       const canvasRect = canvas.getBoundingClientRect();   //キャンバスのマウスカーソルの座標を取得
+       const x = event.clientX - canvasRect.left;
+       const y = event.clientY - canvasRect.top;
+       if (startTime != null) {
+           //パーティクルを作成
+           const time = new Date() - startTime;             //マウスボタンを押していた長さ（ミリ秒）を計算
+           startTime = null;
+           setParticles(x, y, time);
+           document.getElementById("score").innerText = "--";   //スコアをｰｰに
+       }
+    });
+    //枠、傾斜、コップを作成
+    setLine([[0, 0], [0, 4], [4, 4], [4, 0]]);           //物理ワールドに枠を作成
+    setLine([[0, 1.6], [1.9, 2], [1.95, 2.8]]);          //物理ワールドに板を作成
+    setLine([[4, 1.6], [2.1, 2], [2.05, 2.8]]);
+    setCup();
+    //描画
+    render();
+}
+
+const setLine = pos => {
+    //線の作成、配置
+    const shape = new b2ChainShape();                            //鎖状の形状を作成
+    for (let i=0; i<pos.length; i++) {
+        shape.vertices.push(new b2Vec2(pos[i][0], pos[i][1]));  //鎖状の形状の頂点を指定
+    }
+    const line = world.CreateBody(new b2BodyDef());             //物理ワールドにオブジェクトを作成
+    line.CreateFixtureFromShape(shape, 0);                      //オブジェクトに鎖型の形状と密度(0)を設定
+}
+
+const setCup = () => {
+    //コップの作成、配置
+    for (const radio of document.getElementsByName("cup")) {     //チェックされたコップを取得
+       if (radio.checked) index = radio.value;
+    }
+    if (cup != null) world.DestroyBody(cup);                    //現在のコップのオブジェクトを削除
+    const shape = new b2ChainShape();                           //物理ワールドにコップのオブジェクトを作成
+    for (let i=0; i<4; i++) {
+        const [x, y] = cups[index][i];
+        shape.vertices.push(new b2Vec2(x, y));
+    }
+    cup = world.CreateBody(new b2BodyDef());
+    cup.CreateFixtureFromShape(shape, 0);
+}
+
+const setParticles = (x, y, time) => {
+    //パーティクルを作成
+    if (particleSystem != null) world.DestroyParticleSystem(particleSystem);    //現在のパーティクルを削除
+    const particleSystemDef = new b2ParticleSystemDef();                        //パーティクルを作成
+    particleSystemDef.radius = 0.02;                                            //パーティクルの半径は0.02
+    const particleGroupDef = new b2ParticleGroupDef();                          //液体グループを作成
+    const circle = new b2CircleShape();                                         //流体グループは円形とし、半径はマウスボタンを押した時間から計算(キャンバスの外にはみ出さないようにし、最大半径は0.6)
+    //パーティクル数（グループ半径）
+    let size = time / 2500;
+    if (x/100 + size > 4) size = 4 - x/100;
+    if (x/100 - size < 0) size = x/100;
+    if (size > 0.6) size = 0.6;
+    circle.radius = size;
+    particleGroupDef.shape = circle;
+    particleGroupDef.position = new b2Vec2(x/100, y/100);                       //流体グループの位置をセット
+    particleGroupDef.flags = b2_waterParticle;                                  //流体グループの種類は水
+    particleSystem = world.CreateParticleSystem(particleSystemDef);
+    particleSystem.CreateParticleGroup(particleGroupDef);
+}
+
+const render = () => {
+    //パーティクルの描画、スコアの表示
+    context.clearRect(0, 0, 400, 400);
+    if (particleSystem != null) {                           //パーティクルがあるなら
+       let min = 4, max = 0;
+       const buffer = particleSystem.GetPositionBuffer();   //パーティクルの座標を取得
+       for (let i=0; i<buffer.length; i+=2) {
+           drawCircle(buffer[i]*100, buffer[i+1]*100);
+           if (buffer[i+1] < min) min = buffer[i+1];        //パーティクルのＹ座標の最小値と最大値を保存
+           if (buffer[i+1] > max) max = buffer[i+1];
+       }
+       if (min > 3) {                                       //最も上にあるパーティクルのY座標が3より大きいなら
+           score = Math.floor((3.85 - min) * 200);          //スコアを計算
+           if (max > 3.9) score = 0;                        //液体がこぼれたなら、スコアは０
+           document.getElementById("score").innerText = score;
+       }
+   }
+   //液体表現
+   const imageData = context.getImageData(0, 0, 400, 400);     //キャンバスのデータを取得
+   for (let i=0; i<imageData.data.length; i+=4) {
+       let a = imageData.data[i+3];                            //透明度の値を取得
+       if (a < 200) a = 0;                                     //透明度が200より小さいなら０にする
+       imageData.data[i+3] = Math.floor(a * 0.6);              //透明度に0.6をかけて、半透明にする
+   }
+   context.putImageData(imageData, 0, 0);
+   //傾斜の描画
+   context.lineWidth = 12;                                                  //線の太さは12
+   drawLines("#336633", [[-10, 160+10], [190-10, 200+10], [195-10, 280]]);  //濃い緑色で坂を描く
+   drawLines("#336633", [[400+10, 160+10], [210+10, 200+10], [205+10, 280]]);
+   //コップの描画
+   const pos = new Array();
+   const d = [[-15, 0], [-15, 10], [15, 10], [15, 0]];          //コップ描画用の調整値
+   for (let i=0; i<4; i++) {
+       let [x, y] = cups[index][i];                              //コップデータ（配列cups)からコップの頂点の座標を計算
+       pos[i] = [x*100 + d[i][0], y*100 + d[i][1]];
+    }
+    drawLines("#CC3366", pos);
+    //更新
+    world.Step(1/60, 8, 3);                                     //60分の1秒ごとに物理ワールドを更新
+    window.requestAnimationFrame(render);                       //アニメーションを行う
+}
+
+const drawCircle = (x, y) => {
+    //円の描画
+    const grad = context.createRadialGradient(x, y, 0, x, y, 20);   //円形グラデーションを作成
+    grad.addColorStop(0, "rgba(0, 100, 255, 1)");                   //不透明から透明までの青でグラデーションを作成
+    grad.addColorStop(1, "rgba(0, 100, 255, 0)");
+    context.fillStyle = grad;
+    context.beginPath();
+    context.arc(x, y, 20, 0, Math.PI*2);                            //指定したグラデーションで、半径20の塗りつぶし円を描く
+    context.fill();
+}
+
+const drawLines = (color, pos) => {
+    //線の描画
+    context.strokeStyle = color;                                    //配列posに指定した座標の連続した線を描く
+    context.beginPath();
+    context.moveTo(pos[0][0], pos[0][1]);
+    for (let i=1; i<pos.length; i++) {
+        context.lineTo(pos[i][0], pos[i][1]);
+    }
+    context.stroke();
+}
+</script>
+<style>
+#score {
+    font-weight: bold;
+    color: #CC0000;
+}
+canvas {
+    border: thin solid #999999;
+    background-image: repeating-linear-gradient(
+        #DDDDDD, #DDDDDD 1px, #FFFFFF 1px, #FFFFFF 10px);
+}
+</style>
+</head>
+<body onload="init()">
+<p>液体注ぎゲーム</p>
+<input type="radio" name="cup" value="0" checked onchange="setCup()">コップ1
+<input type="radio" name="cup" value="1" onchange="setCup()">コップ2
+<input type="radio" name="cup" value="2" onchange="setCup()">コップ3
+| スコア:<span id="score">--</span>点
+<hr>
+<canvas id="note" width="400" height="400"></canvas>     
+</body>
+</html>
